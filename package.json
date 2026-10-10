@@ -1,0 +1,7 @@
+{
+  "name": "asaas-3ds-protect",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demonstração de pagamento com autenticação 3DS e confirmação por webhook Asaas",
+  "scripts": { "start": "node src/server.js" }
+}
