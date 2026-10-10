@@ -12,6 +12,6 @@ services:
       - key: NODE_ENV
         value: production
       - key: ALLOWED_ORIGINS
-        value: https://sabinadaa.github.io,http://localhost:3000
+        value: https://sabinadaa.github.io,http://localhost:3000,http://localhost:3001
       - key: ASAAS_WEBHOOK_TOKEN
         generateValue: true

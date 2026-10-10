@@ -2,6 +2,6 @@
   "name": "asaas-3ds-protect",
   "version": "1.0.0",
   "private": true,
-  "description": "Demonstração de pagamento com autenticação 3DS e confirmação por webhook Asaas",
+  "description": "Checkout com pagamentos Pix e cartão protegidos pelo Asaas e 3D Secure",
   "scripts": { "start": "node src/server.js" }
 }

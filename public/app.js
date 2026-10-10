@@ -1,87 +1,204 @@
-const $ = s => document.querySelector(s);
-const form = $('#payment-form'), button = $('#pay-button'), toast = $('#toast');
+const $ = selector => document.querySelector(selector);
+const form = $('#payment-form');
+const button = $('#pay-button');
+const toast = $('#toast');
 const apiBase = (window.PAYMENT_API_BASE || '').replace(/\/+$/, '');
-const onGithubPages = location.hostname.endsWith('github.io');
-let config = { mode: 'demo' }, currentPayment = null, pollTimer = null;
+let config = { mode: 'unconfigured' };
+let currentPayment = null;
+let pollTimer = null;
 
-async function request(url, body) {
-  if (onGithubPages && !apiBase) throw new Error('O backend Node ainda não foi configurado. Defina PAYMENT_API_BASE em public/config.js com a URL HTTPS do servidor.');
-  const response = await fetch(`${apiBase}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await response.json();
+async function request(url, options = {}) {
+  const response = await fetch(`${apiBase}${url}`, {
+    ...options,
+    headers: { ...(options.body ? { 'content-type': 'application/json' } : {}), ...(options.headers || {}) },
+    cache: 'no-store'
+  });
+  let data;
+  try { data = await response.json(); } catch { data = {}; }
   if (!response.ok) throw new Error(data.error || 'Falha ao processar a solicitação.');
   return data;
 }
-function notify(message) { toast.textContent = message; toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 3600); }
-function maskDigits(input, pattern) { const raw = input.value.replace(/\D/g, ''); let out = '', i = 0; for (const ch of pattern) { if (ch === '#') { if (raw[i] == null) break; out += raw[i++]; } else { if (raw.length <= i) break; out += ch; } } input.value = out; }
+
+function notify(message) {
+  toast.textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 4200);
+}
+
+function digits(id) { return $(`#${id}`).value.replace(/\D/g, ''); }
+function maskDigits(input, pattern) {
+  const raw = input.value.replace(/\D/g, '');
+  let out = '', i = 0;
+  for (const ch of pattern) {
+    if (ch === '#') { if (raw[i] == null) break; out += raw[i++]; }
+    else { if (raw.length <= i) break; out += ch; }
+  }
+  input.value = out;
+}
+
 $('#card-number').addEventListener('input', e => maskDigits(e.target, '#### #### #### ####'));
 $('#expiry').addEventListener('input', e => maskDigits(e.target, '## / ##'));
 $('#cpf').addEventListener('input', e => maskDigits(e.target, '###.###.###-##'));
-$('#phone').addEventListener('input', e => { const d=e.target.value.replace(/\D/g,'').slice(0,11);e.target.value=d.length>10?`(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`:d.length>6?`(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`:d.length>2?`(${d.slice(0,2)}) ${d.slice(2)}`:d; });
+$('#phone').addEventListener('input', e => {
+  const d = e.target.value.replace(/\D/g, '').slice(0, 11);
+  e.target.value = d.length > 10 ? `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}` : d.length > 6 ? `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}` : d.length > 2 ? `(${d.slice(0, 2)}) ${d.slice(2)}` : d;
+});
 $('#postal').addEventListener('input', e => maskDigits(e.target, '#####-###'));
 
-function setRow(id, state, detail) { const row = $(`#${id}`); row.className = `timeline-row ${state}`; const icon = row.querySelector('.timeline-icon'); if (state === 'done') icon.textContent = '✓'; else if (state === 'failed') icon.textContent = '×'; else if (state === 'active') icon.textContent = '◌'; row.querySelector('small').textContent = detail; }
-function setStatus(payment) {
-  currentPayment = payment;
-  $('#order-time').textContent = `Pedido ${payment.orderId} · ${new Date(payment.createdAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;
-  $('#mode-badge').textContent = payment.mode === 'asaas' ? (config.api || 'ASAAS').toUpperCase() : 'DEMO';
-  $('#mode-badge').classList.toggle('live', payment.mode === 'asaas');
-  if (payment.status === 'CONFIRMED') {
-    setRow('auth-row','done','Identidade autenticada pelo banco emissor'); setRow('result-row','done','Pagamento confirmado pelo Asaas'); $('#pending-note').innerHTML='<span>✓</span> Pagamento confirmado pelo evento do Asaas.';
-  } else if (payment.status === 'REFUSED') {
-    setRow('auth-row','failed',payment.event?.includes('CHALLENGE_FAILED')?'Autenticação não concluída':'Transação recusada pelo banco emissor'); setRow('result-row','failed','Pedido não liberado · nenhum pagamento confirmado'); $('#pending-note').innerHTML='<span>!</span> Não libere o pedido. Tente outro método de pagamento.';
-  } else if (payment.challengeUrl && payment.issuerResult !== 'success') {
-    setRow('auth-row','active','O banco emissor solicita uma confirmação'); setRow('result-row','', 'Aguardando desafio e webhook do Asaas');
-  } else if (payment.challengeUrl && payment.issuerResult === 'success') {
-    setRow('auth-row','done','Desafio concluído pelo pagador'); setRow('result-row','active','Aguardando confirmação do Asaas por webhook');
-  } else {
-    setRow('auth-row','done','Autenticação silenciosa (frictionless)'); setRow('result-row','active','Aguardando confirmação do Asaas por webhook');
-  }
-  if (payment.mode === 'demo') {
-    $('#demo-actions').hidden = false;
-    if (payment.challengeUrl && !payment.event && payment.issuerResult !== 'success') $('#demo-actions').innerHTML = `<strong>Simulação do banco emissor</strong><div>O Asaas só confirma após o resultado do desafio e a notificação de webhook.</div><button class="primary" data-action="challenge">Aprovar desafio (OTP)</button><button data-action="fail">Falhar desafio</button>`;
-    else if (!payment.event && payment.scenario === 'refused') $('#demo-actions').innerHTML = `<strong>Simulação de recusa do emissor</strong><div>Uma recusa mantém o pedido bloqueado e não libera o produto.</div><button class="primary" data-action="refuse">Receber webhook de recusa</button><button data-action="confirm">Simular aprovação</button>`;
-    else if (!payment.event) $('#demo-actions').innerHTML = `<strong>Aguardando evento de confirmação</strong><div>Simule a notificação autenticada do Asaas para concluir o pedido.</div><button class="primary" data-action="confirm">Simular webhook PAYMENT_CONFIRMED</button><button data-action="refuse">Simular recusa</button>`;
-    else $('#demo-actions').innerHTML = `<strong>Demonstração concluída</strong><div>Evento processado com proteção contra reenvio duplicado.</div><button data-action="again">Iniciar outro pagamento</button>`;
-  } else { $('#demo-actions').hidden = true; }
-  $('#event-log').hidden = !payment.event;
-  if (payment.event) $('#event-name').textContent = payment.event;
+function selectedMethod() { return $('input[name="payment-method"]:checked')?.value || 'PIX'; }
+function updateMethod() {
+  const method = selectedMethod();
+  const cardFields = $('#card-fields');
+  const address = $('.address-details');
+  cardFields.hidden = method !== 'CREDIT_CARD';
+  address.hidden = method !== 'CREDIT_CARD';
+  $('#phone').required = method === 'CREDIT_CARD';
+  for (const id of ['card-number', 'expiry', 'cvv']) $(`#${id}`).required = method === 'CREDIT_CARD';
+  $('#panel-title').textContent = method === 'PIX' ? 'Pix' : method === 'DEBIT_CARD' ? 'Cartão de débito' : 'Cartão de crédito';
+  $('#button-method').textContent = method === 'PIX' ? 'Gerar Pix' : method === 'DEBIT_CARD' ? 'Continuar para débito' : 'Pagar com crédito';
+  $('#method-hint').textContent = method === 'DEBIT_CARD'
+    ? 'O pagamento será concluído na página segura do Asaas, onde você poderá escolher débito.'
+    : method === 'PIX' ? 'O QR Code será gerado pelo Asaas e confirmado após o pagamento.' : 'O banco pode solicitar uma etapa de autenticação 3D Secure.';
+}
+document.querySelectorAll('input[name="payment-method"]').forEach(input => input.addEventListener('change', updateMethod));
+updateMethod();
+
+function setRow(id, state, detail) {
+  const row = $(`#${id}`);
+  row.className = `timeline-row ${state}`;
+  const icon = row.querySelector('.timeline-icon');
+  icon.textContent = state === 'done' ? '✓' : state === 'failed' ? '×' : state === 'active' ? '◌' : id === 'auth-row' ? '2' : '3';
+  row.querySelector('small').textContent = detail;
 }
 
-$('#demo-actions').addEventListener('click', async e => {
-  const action = e.target.dataset.action; if (!action) return;
-  try {
-    if (action === 'again') { currentPayment = null; $('#payment-form').reset(); $('#demo-actions').hidden = true; setRow('auth-row','','Aguardando envio dos dados'); setRow('result-row','','Confirmada somente pelo Asaas'); $('#event-log').hidden=true; $('#pending-note').innerHTML='<span>◉</span> O retorno ao checkout não confirma o pagamento.'; return; }
-    if (action === 'challenge' || action === 'fail') {
-      const result = await request('/api/demo/challenge',{paymentId:currentPayment.id,result:action==='challenge'?'success':'fail'});
-      if (action === 'fail') currentPayment.issuerResult='fail';
-      else currentPayment.issuerResult='success';
-      currentPayment={...currentPayment,...result};
-      if (action === 'fail') { const p=await request('/api/demo/webhook',{paymentId:currentPayment.id,event:'PAYMENT_CREDIT_CARD_THREE_D_SECURE_CHALLENGE_FAILED'}); setStatus(p); }
-      else { setStatus(currentPayment); notify('Desafio aprovado. Agora aguarde o webhook do Asaas.'); }
-    } else {
-      const event = action==='confirm'?'PAYMENT_CONFIRMED':'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED';
-      const p=await request('/api/demo/webhook',{paymentId:currentPayment.id,event,eventId:`evt_${crypto.randomUUID()}`});setStatus(p);notify(event==='PAYMENT_CONFIRMED'?'Webhook recebido. Pedido confirmado com segurança.':'Webhook de recusa recebido. Pedido mantido bloqueado.');
-    }
-  } catch(err) { notify(err.message); }
-});
+function renderPayment(payment) {
+  currentPayment = payment;
+  $('#order-time').textContent = `Pedido ${payment.orderId || 'Asaas'} · ${new Date(payment.createdAt || Date.now()).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  $('#mode-badge').textContent = (config.api || 'ASAAS').toUpperCase();
+  $('#mode-badge').classList.add('live');
+  $('#event-log').hidden = !payment.event;
+  if (payment.event) $('#event-name').textContent = payment.event;
 
-form.addEventListener('submit', async e => {
-  e.preventDefault();
-  if (onGithubPages && !apiBase) { notify('Backend não configurado. Defina PAYMENT_API_BASE em public/config.js para habilitar o envio.'); return; }
-  const [month, year] = $('#expiry').value.split('/').map(x=>x.trim());
-  const deviceInfo={colorDepth:screen.colorDepth,screenHeight:screen.height,screenWidth:screen.width,timeZoneOffset:new Date().getTimezoneOffset()/60,language:navigator.language,userAgent:navigator.userAgent};
-  const body={ value:189.00, scenario:$('#scenario').value, card:{holderName:$('#name').value,number:$('#card-number').value,expiryMonth:month,expiryYear:year?.length===2?`20${year}`:year,ccv:$('#cvv').value}, holder:{name:$('#name').value,email:$('#email').value,cpf:$('#cpf').value.replace(/\D/g,''),phone:$('#phone').value.replace(/\D/g,''),postalCode:$('#postal').value.replace(/\D/g,''),address:$('#address').value,addressNumber:$('#number').value,province:$('#province').value}, deviceInfo};
-  button.disabled=true;button.innerHTML='<span>◌</span> Processando com segurança…';
-  try {
-    const payment=await request('/api/payments',body);setStatus(payment);$('#status-panel').scrollIntoView({behavior:'smooth',block:'nearest'});
-    if (payment.challengeUrl && payment.mode === 'asaas') { notify('Redirecionando para a autenticação do banco…'); setTimeout(() => location.assign(payment.challengeUrl), 700); }
-    else notify(payment.challengeUrl?'Pagamento pendente: o banco exige autenticação 3DS.':'Solicitação enviada. Aguardando resultado do pagamento.');
+  const pixPanel = $('#pix-result');
+  if (payment.pix?.encodedImage) {
+    $('#pix-qr').src = `data:image/png;base64,${payment.pix.encodedImage}`;
+    $('#pix-payload').value = payment.pix.payload || '';
+    $('#pix-expiration').textContent = payment.pix.expirationDate ? `Válido até ${new Date(payment.pix.expirationDate).toLocaleString('pt-BR')}` : 'QR Code gerado pelo Asaas';
+    pixPanel.hidden = false;
   }
-  catch(error){notify(error.message);}
-  finally{button.disabled=false;button.innerHTML='<span>🔒</span> Pagar R$ 189,00 <b>→</b>';}
+
+  const finalStatuses = ['CONFIRMED', 'RECEIVED', 'REFUNDED', 'REFUND_REQUESTED', 'CHARGEBACK_REQUESTED', 'OVERDUE', 'CANCELED', 'DELETED'];
+  if (['CONFIRMED', 'RECEIVED'].includes(payment.status)) {
+    setRow('auth-row', 'done', payment.method === 'CREDIT_CARD' ? 'Validação processada pelo banco / 3DS' : 'Forma de pagamento processada');
+    setRow('result-row', 'done', 'Pagamento confirmado pelo Asaas');
+    $('#pending-note').innerHTML = '<span>✓</span> Pagamento confirmado pelo Asaas. O pedido pode ser liberado.';
+  } else if (['REFUSED', 'REFUNDED', 'CANCELED', 'DELETED', 'OVERDUE', 'CHARGEBACK_REQUESTED'].includes(payment.status)) {
+    setRow('auth-row', 'failed', payment.status === 'OVERDUE' ? 'Pagamento vencido' : 'Pagamento não aprovado');
+    setRow('result-row', 'failed', `Status Asaas: ${payment.status}`);
+    $('#pending-note').innerHTML = '<span>!</span> Não libere o pedido. Consulte o status atualizado no Asaas.';
+  } else {
+    setRow('auth-row', payment.challengeUrl ? 'active' : 'done', payment.challengeUrl ? 'O banco emissor solicita uma confirmação' : 'Dados recebidos pelo Asaas');
+    setRow('result-row', '', `Aguardando confirmação do Asaas · ${payment.status || 'PENDING'}`);
+    $('#pending-note').innerHTML = '<span>◉</span> Retorno ao checkout não confirma pagamento. Aguardando o Asaas.';
+  }
+  if (payment.invoiceUrl) {
+    $('#hosted-link').href = payment.invoiceUrl;
+    $('#hosted-payment').hidden = false;
+  }
+  if (!finalStatuses.includes(payment.status)) startPolling(payment.id);
+}
+
+async function refreshPayment(id) {
+  const data = await request(`/api/payments/${encodeURIComponent(id)}`);
+  renderPayment(data);
+}
+function startPolling(id) {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const data = await request(`/api/payments/${encodeURIComponent(id)}`);
+      renderPayment(data);
+      if (['CONFIRMED', 'RECEIVED', 'REFUSED', 'REFUNDED', 'CANCELED', 'DELETED', 'OVERDUE'].includes(data.status)) clearInterval(pollTimer);
+    } catch { /* Mantém a cobrança pendente enquanto o servidor tenta novamente. */ }
+  }, 5000);
+}
+
+$('#copy-pix').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#pix-payload').value); notify('Código Pix copiado.'); }
+  catch { $('#pix-payload').select(); document.execCommand('copy'); notify('Código Pix copiado.'); }
 });
 
-if (onGithubPages && !apiBase) {
-  $('#mode-badge').textContent = 'API PENDENTE';
-  $('#pending-note').innerHTML = '<span>◉</span> Formulário restaurado. Configure o backend HTTPS antes de enviar dados.';
-} else fetch(`${apiBase}/api/config`).then(r=>r.json()).then(data=>{config=data;if(data.mode==='asaas'){$('#demo-controls').hidden=true;$('#mode-badge').textContent=(data.api||'asaas').toUpperCase();$('#mode-badge').classList.add('live');$('#pending-note').innerHTML='<span>◉</span> Confirmação final recebida pelo webhook do Asaas.';}}).catch(()=>notify('Não foi possível conectar ao servidor.'));
+function validateForm(method) {
+  for (const [id, message] of [['name', 'Informe o nome do titular.'], ['email', 'Informe um e-mail válido.'], ['cpf', 'Informe o CPF do titular.']]) {
+    const field = $(`#${id}`);
+    if (!field.value.trim()) { notify(message); field.focus(); return false; }
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($('#email').value.trim())) { notify('Confira o formato do e-mail.'); $('#email').focus(); return false; }
+  if (digits('cpf').length !== 11) { notify('O CPF deve ter 11 dígitos.'); $('#cpf').focus(); return false; }
+  if (method === 'CREDIT_CARD') {
+    for (const [id, message] of [['card-number', 'Informe o número do cartão.'], ['expiry', 'Informe a validade do cartão.'], ['cvv', 'Informe o código de segurança.'], ['phone', 'Informe o celular do titular.']]) {
+      const field = $(`#${id}`);
+      if (!field.value.trim()) { notify(message); field.focus(); return false; }
+    }
+    if (digits('card-number').length < 12) { notify('Confira o número do cartão.'); $('#card-number').focus(); return false; }
+    if (!/^\d{2}\s*\/\s*\d{2,4}$/.test($('#expiry').value)) { notify('Use a validade no formato MM / AA.'); $('#expiry').focus(); return false; }
+    if (!/^\d{3,4}$/.test(digits('cvv'))) { notify('O código de segurança deve ter 3 ou 4 dígitos.'); $('#cvv').focus(); return false; }
+    if (digits('phone').length < 10) { notify('Informe um celular com DDD.'); $('#phone').focus(); return false; }
+    const missingAddress = ['postal', 'number', 'address', 'province'].find(id => !$(`#${id}`).value.trim());
+    if (missingAddress) { $('.address-details').open = true; notify('Complete o endereço de cobrança para validar o cartão.'); $(`#${missingAddress}`).focus(); return false; }
+  }
+  return true;
+}
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  const method = selectedMethod();
+  if (config.mode !== 'asaas') { notify(config.error || 'Asaas indisponível. Configure e publique o backend com uma chave de API.'); return; }
+  if (!validateForm(method)) return;
+  const body = {
+    paymentMethod: method,
+    holder: { name: $('#name').value.trim(), email: $('#email').value.trim(), cpf: digits('cpf'), phone: digits('phone') },
+    deviceInfo: { colorDepth: screen.colorDepth, screenHeight: screen.height, screenWidth: screen.width, timeZoneOffset: new Date().getTimezoneOffset() / 60, language: navigator.language, userAgent: navigator.userAgent }
+  };
+  if (method === 'CREDIT_CARD') {
+    const [month, rawYear] = $('#expiry').value.split('/').map(value => value.trim());
+    body.card = { holderName: $('#name').value.trim(), number: digits('card-number'), expiryMonth: month, expiryYear: rawYear.length === 2 ? `20${rawYear}` : rawYear, ccv: digits('cvv') };
+    body.holder = { ...body.holder, postalCode: digits('postal'), address: $('#address').value.trim(), addressNumber: $('#number').value.trim(), province: $('#province').value.trim() };
+  }
+  button.disabled = true;
+  button.innerHTML = '<span>◌</span> Conectando ao Asaas…';
+  $('#pix-result').hidden = true;
+  $('#hosted-payment').hidden = true;
+  try {
+    const payment = await request('/api/payments', { method: 'POST', body: JSON.stringify(body) });
+    renderPayment(payment);
+    $('#status-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (payment.challengeUrl) {
+      notify('O banco solicitou autenticação 3DS. Abrindo ambiente do emissor…');
+      setTimeout(() => location.assign(payment.challengeUrl), 700);
+    } else if (payment.invoiceUrl) notify('Cobrança criada. Continue na página segura do Asaas para escolher débito.');
+    else if (payment.pix) notify('Pix criado pelo Asaas. Pague usando o QR Code ou o código copia e cola.');
+    else notify('Solicitação enviada. Aguardando confirmação do Asaas.');
+  } catch (error) { notify(error.message); }
+  finally { button.disabled = false; button.innerHTML = `<span>🔒</span> <span id="button-method">${method === 'PIX' ? 'Gerar Pix' : method === 'DEBIT_CARD' ? 'Continuar para débito' : 'Pagar com crédito'}</span> <b>→</b>`; }
+});
+
+async function loadConfig() {
+  try {
+    config = await request('/api/config');
+    $('#mode-badge').textContent = config.mode === 'asaas' ? (config.api || 'ASAAS').toUpperCase() : 'API INDISPONÍVEL';
+    $('#mode-badge').classList.toggle('live', config.mode === 'asaas');
+    if (config.mode === 'asaas') $('#pending-note').innerHTML = '<span>◉</span> Nenhum pagamento foi confirmado. A confirmação virá do Asaas.';
+    else {
+      config.error = config.message || 'Backend encontrado, mas ASAAS_API_KEY não está configurada.';
+      $('#pending-note').innerHTML = '<span>!</span> Backend sem configuração Asaas. Nenhuma aprovação será simulada.';
+      button.disabled = true;
+    }
+  } catch {
+    config = { mode: 'unconfigured', error: 'Não foi possível conectar ao backend. Confira PAYMENT_API_BASE e o serviço Node.' };
+    $('#mode-badge').textContent = 'API OFFLINE';
+    $('#pending-note').innerHTML = '<span>!</span> Não foi possível conectar ao backend de pagamentos.';
+    button.disabled = true;
+  }
+}
+loadConfig();

@@ -1,74 +1,70 @@
-# Sistema 3DS — EXX Nutrition
+# Checkout seguro — EXX Nutrition
 
-Aplicação local demonstrativa de pagamentos com autenticação 3D Secure. Ela inicia no modo demonstração, sem credenciais, para permitir testar a experiência inteira no navegador.
+Checkout web conectado ao Asaas, com pagamento por Pix, cartão de crédito com 3D Secure e cartão de débito na página hospedada do Asaas. Não existe modo de demonstração: sem backend configurado, a tela informa que pagamentos estão indisponíveis e não simula aprovação.
 
-## Estrutura do projeto
+## Estrutura
 
 ```text
-index.html  Página inicial na raiz, publicada pelo GitHub Pages
-public/     CSS, JavaScript e configuração pública do frontend
-src/      Servidor HTTP e integração Asaas
-outputs/  Arquivos finais exportados
-work/     Arquivos temporários de trabalho
+index.html       Página inicial servida pelo GitHub Pages ou Node
+public/          CSS, JavaScript e URL pública do backend
+src/server.js    Backend Node e integração privada com Asaas
+render.yaml      Configuração de publicação do backend no Render
 ```
 
-## Executar
+## Executar localmente
 
-Requer Node.js 18 ou superior. No diretório do projeto:
-
-```powershell
-node src/server.js
-```
-
-Abra <http://localhost:3000>. Preencha os campos com dados fictícios e escolha uma resposta do banco. No cenário de desafio, aprove/falhe o desafio e depois simule o webhook Asaas. Nenhum pagamento real ocorre sem `ASAAS_API_KEY`.
-
-## Publicar a aplicação web
-
-O `index.html` fica na raiz do repositório para o GitHub Pages encontrá-lo como página inicial. O workflow publica esse arquivo e a pasta `public/` na raiz do site. GitHub Pages publica HTML, CSS e JavaScript, mas não executa o servidor Node. O arquivo `render.yaml` configura o backend Node para o Render; o arquivo `public/config.js` aponta o frontend do GitHub Pages para esse backend por HTTPS. O próprio serviço Render também serve a aplicação completa no mesmo domínio.
-
-Para publicar a aplicação completa, importe este repositório no Render usando **New → Blueprint**. O serviço `exx-nutrition-3ds` inicia sem `ASAAS_API_KEY` em modo de demonstração e aceita dados fictícios para testar o formulário. O domínio padrão é `https://exx-nutrition-3ds.onrender.com`. Se o Render atribuir outro domínio, atualize `public/config.js` antes de publicar no GitHub Pages. Para servir a interface pelo Pages, ative **Settings → Pages → Build and deployment → Source: GitHub Actions**; o workflow publica o `index.html` da raiz junto com `public/`.
-
-O CORS do Node aceita o domínio GitHub Pages deste projeto e origens locais de desenvolvimento. O backend retorna erro se o front-end no Pages ainda não estiver configurado com sua URL. Não inclua a chave Asaas em `public/config.js`, no GitHub Pages ou no repositório.
-
-O resumo usa o produto público “Whey 100% Concentrado Pouch 900g — EXX Nutrition”, listado por R$ 189,00 na página consultada. A foto é carregada diretamente do CDN da EXX, e o link do nome abre a ficha do produto. O frete fica indicado como calculado pelo CEP e não entra no valor desta simulação.
-
-## Modos de integração
-
-Sem `ASAAS_API_KEY`, o servidor simula a jornada: desafio do emissor, frictionless e recusa. Os botões de simulação disparam eventos localmente, incluindo a proteção contra evento duplicado.
-
-No modo demonstração, confira a jornada manual 3DS na tela. Os cenários locais não cobram nem chamam o Asaas.
-
-Para conectar ao Sandbox Asaas:
+Requer Node.js 18 ou superior.
 
 ```powershell
 $env:ASAAS_API_KEY="sua_chave_sandbox"
-$env:ASAAS_WEBHOOK_TOKEN="um-segredo-compartilhado-com-32-caracteres-ou-mais"
-$env:PUBLIC_BASE_URL="https://seu-dominio-publico"
+$env:ASAAS_WEBHOOK_TOKEN="um-segredo-longo-e-aleatorio"
+$env:PUBLIC_BASE_URL="http://localhost:3000"
 node src/server.js
 ```
 
-No Render, cadastre `ASAAS_API_KEY` somente no painel **Environment** do serviço. O blueprint gera um `ASAAS_WEBHOOK_TOKEN`; copie esse valor para a configuração do webhook no painel Asaas. Sem a chave de API, o formulário usa a simulação local e não envia cobrança ao Asaas.
+Abra <http://localhost:3000>. Sem `ASAAS_API_KEY`, o backend permanece disponível para carregar a interface, mas o checkout bloqueia novos pagamentos e não inventa resultados. Use somente credenciais sandbox enquanto valida a integração.
 
-Por padrão a API aponta para `https://api-sandbox.asaas.com/v3`. Para produção, configure também `$env:ASAAS_API_BASE="https://api.asaas.com/v3"` e use uma `PUBLIC_BASE_URL` HTTPS. Configure no painel Asaas um webhook para `/webhooks/asaas` com os eventos `PAYMENT_CONFIRMED`, `PAYMENT_CREDIT_CARD_CAPTURE_REFUSED` e `PAYMENT_CREDIT_CARD_THREE_D_SECURE_CHALLENGE_FAILED`, usando o mesmo token em `ASAAS_WEBHOOK_TOKEN`.
+## Publicar no GitHub Pages e hospedar a API
 
-O servidor cria o cliente Asaas e, em seguida, cria a cobrança `CREDIT_CARD` com `threeDSecure` e `deviceInfo`. A API Key fica somente no servidor. Os dados do cartão são encaminhados diretamente ao Asaas pela chamada server-side e não são gravados em arquivo ou banco local. Em produção, use armazenamento durável para pagamentos/eventos, configure proxy confiável para obter o IP do pagador, limites de requisição, política de retenção, gestão de segredos e controles PCI adequados. Habilite 3DS na conta Asaas com o suporte. Sandbox aprova automaticamente e não simula o desafio real.
+GitHub Pages publica HTML, CSS e JavaScript; ele não executa Node e não pode guardar a chave privada do Asaas. Publique o backend Node como serviço web (o `render.yaml` configura o Render) e cadastre `ASAAS_API_KEY` e `ASAAS_WEBHOOK_TOKEN` no painel de variáveis secretas do serviço. Nunca coloque a chave em `public/config.js`, no HTML ou em repositório.
 
-## Escolha técnica: Checkout x 3DS
+O frontend de GitHub Pages usa `window.PAYMENT_API_BASE` em `public/config.js`. Troque o valor `https://exx-nutrition-3ds.onrender.com` pela URL HTTPS do seu backend quando publicar em outro serviço. Configure também `ALLOWED_ORIGINS` no backend para aceitar somente o domínio real do Pages. Para abrir tudo pelo mesmo serviço Node, acesse o domínio do backend e mantenha `PAYMENT_API_BASE` vazio para usar a mesma origem.
 
-A referência inicial (`POST /v3/checkouts`) cria uma página hospedada e devolve um checkout, não uma confirmação financeira. Os eventos desse recurso são `CHECKOUT_CREATED`, `CHECKOUT_PAID`, `CHECKOUT_CANCELED` e `CHECKOUT_EXPIRED`. O guia específico de 3DS descreve as cobranças de cartão em `POST /v3/payments` com `threeDSecure` e `deviceInfo`, e confirma o resultado por eventos de cobrança. Para atender à necessidade de autenticação explícita 3DS, esta solução usa a segunda rota. Se a prioridade for não coletar cartão no sistema, o Checkout hospedado é a alternativa mais simples, mas seu fluxo deve ser validado com o Asaas para os requisitos 3DS da conta.
+No repositório, ative **Settings → Pages → Build and deployment → Source: GitHub Actions**. O workflow publica o `index.html` da raiz e a pasta `public/`.
 
-## Controles demonstrados
+## Configurar Asaas
 
-- O desafio pode ser silencioso ou exigir uma ação do pagador no banco emissor.
-- O `timeZoneOffset` é enviado em horas e o IP é obtido no servidor.
-- O retorno do desafio mantém o pagamento pendente; a aplicação só conclui com webhook.
-- Eventos de desafio abandonado e captura recusada mantêm o pedido bloqueado.
-- Eventos repetidos não são processados novamente (idempotência por `id`).
-- A chave Asaas não vai para o navegador e o cartão não é persistido.
+Por padrão, o backend usa `https://api-sandbox.asaas.com/v3`. No Render, mantenha `ASAAS_API_BASE` sem definir para sandbox; para produção, configure `ASAAS_API_BASE=https://api.asaas.com/v3`, `PUBLIC_BASE_URL` com HTTPS e uma chave de produção válida. A URL pública também é usada como callback do 3DS.
 
-## Referências Asaas
+Cadastre no painel Asaas um webhook HTTPS apontando para `/webhooks/asaas`, usando o mesmo segredo de `ASAAS_WEBHOOK_TOKEN`. Selecione os eventos:
 
+- `PAYMENT_CONFIRMED`
+- `PAYMENT_RECEIVED`
+- `PAYMENT_CREDIT_CARD_CAPTURE_REFUSED`
+- `PAYMENT_CREDIT_CARD_THREE_D_SECURE_CHALLENGE_FAILED`
+- `PAYMENT_OVERDUE`
+- `PAYMENT_REFUNDED`
+- `PAYMENT_DELETED`
+- `PAYMENT_RESTORED`
+
+O backend valida o token de acesso do webhook e ignora IDs de evento repetidos. Além do webhook, a tela consulta o status da cobrança diretamente no Asaas enquanto ela está pendente. O retorno do 3DS, por si só, nunca aprova o pedido.
+
+## Formas de pagamento
+
+- **Pix:** cria cobrança `PIX`, busca QR Code dinâmico no Asaas e mostra imagem, código copia e cola e vencimento. O status é confirmado pela API/webhook.
+- **Crédito:** encaminha os dados diretamente do backend ao Asaas com `threeDSecure` e `deviceInfo`. Se o emissor pedir desafio, o cliente é redirecionado para a URL fornecida pelo Asaas. A aplicação libera o pedido somente após status final confirmado pelo Asaas.
+- **Débito:** a API não recebe diretamente dados de cartão de débito. O checkout cria uma cobrança de cartão e mostra `invoiceUrl` para o cliente continuar na página segura do Asaas e escolher débito.
+
+O preço do item é definido no backend (R$ 189,00); o navegador não pode alterar o valor da cobrança. O exemplo usa o produto público Whey 100% Concentrado Pouch 900g da EXX Nutrition; frete não está incluído.
+
+## Limites e cuidados
+
+O 3DS precisa estar habilitado na conta Asaas. A documentação informa que o Sandbox aprova transações automaticamente e não permite validar o desafio 3DS real. Não use números de cartão reais no Sandbox. Para produção, use HTTPS, configure uma fonte confiável para o IP do comprador se estiver atrás de proxy, retenção mínima de dados e persistência durável para conciliação de pedidos e eventos. Este exemplo mantém metadados em memória; a consulta direta à cobrança permite atualizar o status após reinício, mas um e-commerce de produção deve integrar um banco de dados durável.
+
+## Documentação consultada
+
+- [Criar cobrança no Asaas](https://docs.asaas.com/reference/criar-nova-cobranca)
+- [Criar cobrança com 3DS](https://docs.asaas.com/docs/criar-cobranca-com-3ds)
+- [Cobranças via Pix e QR Code](https://docs.asaas.com/docs/cobrancas-via-pix)
+- [Cobranças via cartão de crédito e débito](https://docs.asaas.com/docs/cobrancas-via-cartao-de-credito)
 - [Criar novo Checkout](https://docs.asaas.com/reference/criar-novo-checkout)
-- [Criar cobrança com 3DS](https://docs.asaas.com/docs/criar-cobran%C3%A7a-com-3ds)
-- [Eventos para Checkout](https://docs.asaas.com/docs/eventos-para-checkout)
-- [Eventos para cobranças](https://docs.asaas.com/docs/eventos-de-cobrancas)
