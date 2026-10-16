@@ -186,9 +186,12 @@ function applyWebhook(body) {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (!applyCors(req, res)) return json(res, 403, { error: 'Origem não autorizada.' });
-  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const isApiRoute = url.pathname.startsWith('/api/');
+  // CORS protects cross-origin API fetches. Browser redirects from the issuer
+  // to /callback/3ds are top-level navigations and must not be rejected here.
+  if (isApiRoute && !applyCors(req, res)) return json(res, 403, { error: 'Origem não autorizada.' });
+  if (req.method === 'OPTIONS' && isApiRoute) { res.writeHead(204); return res.end(); }
 
   if (req.method === 'GET' && url.pathname === '/api/config') {
     return json(res, 200, {
@@ -233,7 +236,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/callback/3ds') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-    return res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Autenticação concluída</title><body style="margin:0;background:#f4f4f4;font:16px system-ui;color:#171717;display:grid;place-items:center;min-height:100vh"><main style="background:white;padding:36px;border-radius:20px;max-width:480px;box-shadow:0 15px 50px #0001"><div style="font-size:30px">🔐</div><h1>Autenticação concluída</h1><p>O retorno do banco foi recebido. O pagamento permanece pendente até o Asaas confirmar o resultado.</p><p>Volte ao checkout para acompanhar o status.</p></main></body>`);
+    return res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Retorno da autenticação</title><body style="margin:0;background:#f4f4f4;font:16px system-ui;color:#171717;display:grid;place-items:center;min-height:100vh"><main style="background:white;padding:36px;border-radius:20px;max-width:480px;box-shadow:0 15px 50px #0001"><div style="font-size:30px">🔐</div><h1>Retorno da autenticação</h1><p>Estamos voltando ao checkout para consultar o resultado. O pagamento só será confirmado após validação do Asaas.</p><a href="/">Voltar ao checkout</a></main><script>location.replace('/')</script></body>`);
   }
 
   const requested = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\/+/, '');

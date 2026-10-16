@@ -55,7 +55,7 @@ O backend valida o token de acesso do webhook e ignora IDs de evento repetidos. 
 - **Crédito:** permite escolher pagamento à vista ou em até 3 parcelas; no parcelamento, o Asaas recebe `installmentCount` e o valor total do pedido. O backend encaminha os dados ao Asaas com `threeDSecure` e `deviceInfo`. Se o emissor pedir desafio, o cliente é redirecionado para a URL fornecida pelo Asaas. A aplicação libera o pedido somente após status final confirmado pelo Asaas.
 - **Débito:** a API não recebe diretamente dados de cartão de débito. O checkout cria uma cobrança de cartão e mostra `invoiceUrl` para o cliente continuar na página segura do Asaas e escolher débito.
 
-O preço do item é definido no backend (R$ 189,00); o navegador não pode alterar o valor da cobrança. O exemplo usa o produto público Whey 100% Concentrado Pouch 900g da EXX Nutrition; frete não está incluído.
+O backend define a cobrança pelo total do pedido (R$ 6.199,00); o navegador não pode alterar o valor cobrado. A tela apresenta os itens, quantidades e valores correspondentes. Dados pessoais do cliente não são exibidos.
 
 ## Limites e cuidados
 

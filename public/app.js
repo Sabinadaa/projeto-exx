@@ -3,7 +3,23 @@ const form = $('#payment-form');
 const button = $('#pay-button');
 const toast = $('#toast');
 const apiBase = (window.PAYMENT_API_BASE || '').replace(/\/+$/, '');
-const orderTotal = Number($('#payment-form').dataset.total) || 189;
+const orderTotal = Number($('#payment-form').dataset.total) || 6199;
+const quoteItems = [
+  { name: 'Glutamina 100% Pura - Exx Nutrition', code: '1096', qty: 10, unit: 43.90, image: 1 },
+  { name: 'Creatina 100% Pura - 150g - Exx Nutrition', code: '1079', qty: 10, unit: 21.90, image: 2 },
+  { name: 'Creatina 100% Pura - 300g - Exx Nutrition (bonificado)', code: '1004', qty: 2, unit: 0, image: 3 },
+  { name: 'Melatonina Sleep Night 360 Doses - Exx Nutrition - Maracujá', code: '1117', qty: 10, unit: 27.90, image: 4 },
+  { name: 'Gummy Vitamina - Cabelo, Pele e Unha - 60 Gomas - Tutti Frutti - Exx Nutrition', code: '1036', qty: 10, unit: 54.90, image: 5 },
+  { name: 'Multivitamínico Masculino 60 caps - Exx Nutrition', code: '1090', qty: 10, unit: 31.90, image: 6 },
+  { name: 'Ômega 3 - 33% EPA + 22% DHA - 1000mg C/60 Caps - Exx Nutrition', code: '11103', qty: 10, unit: 31.90, image: 7 },
+  { name: 'Ultra Protein Whey 420g - Exx Nutrition - Morango', code: '2014', qty: 10, unit: 65.90, image: 8 },
+  { name: 'Ultra Protein Whey 900g - Exx Nutrition - Chocolate', code: '2018', qty: 10, unit: 102.90, image: 9 },
+  { name: 'Ultra Protein Whey 900g - Exx Nutrition - Leite em pó', code: '2016', qty: 10, unit: 102.90, image: 10 },
+  { name: 'Ultra Protein Whey 900g - Exx Nutrition - Morango', code: '2017', qty: 10, unit: 102.90, image: 11 },
+  { name: 'ExxDreneHD - Termogênico - Exx Nutrition (bonificado)', code: '1009', qty: 2, unit: 0, image: 12 },
+  { name: 'Creatina 100% Pura - 300g - Exx Nutrition', code: '1004', qty: 10, unit: 32.90, image: 3 },
+  { name: 'Camiseta Masculina DryFit - EXG - Preto (bonificado)', code: '1158', qty: 1, unit: 0, image: 13 }
+];
 let config = { mode: 'unconfigured' };
 let currentPayment = null;
 let pollTimer = null;
@@ -24,6 +40,39 @@ function notify(message) {
   toast.textContent = message;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 4200);
+}
+
+function formatMoney(value) {
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function renderQuoteItems() {
+  const list = $('#order-items');
+  const quoteTotal = quoteItems.reduce((sum, item) => sum + item.unit * item.qty, 0);
+  const quantityTotal = quoteItems.reduce((sum, item) => sum + item.qty, 0);
+  $('#quote-count').textContent = `${quoteItems.length} itens · ${quantityTotal} unidades`;
+  $('#quote-total').textContent = formatMoney(quoteTotal);
+  for (const item of quoteItems) {
+    const row = document.createElement('article');
+    row.className = 'quote-item';
+    const image = document.createElement('img');
+    image.src = `public/products/${String(item.image).padStart(2, '0')}.jpg`;
+    image.alt = item.name;
+    image.loading = 'lazy';
+    const details = document.createElement('div');
+    const title = document.createElement('h4');
+    title.textContent = item.name;
+    const meta = document.createElement('small');
+    meta.textContent = item.unit === 0
+      ? `Cód. ${item.code} · ${item.qty} un. · Bonificado`
+      : `Cód. ${item.code} · ${item.qty} un. · ${formatMoney(item.unit)} cada`;
+    const subtotal = document.createElement('strong');
+    subtotal.className = 'quote-item-price';
+    subtotal.textContent = `Subtotal: ${formatMoney(item.unit * item.qty)}`;
+    details.append(title, meta, subtotal);
+    row.append(image, details);
+    list.append(row);
+  }
 }
 
 function digits(id) { return $(`#${id}`).value.replace(/\D/g, ''); }
@@ -49,11 +98,15 @@ $('#postal').addEventListener('input', e => maskDigits(e.target, '#####-###'));
 function selectedMethod() { return $('input[name="payment-method"]:checked')?.value || 'PIX'; }
 function updateInstallmentSummary() {
   const count = Number($('#installments').value) || 1;
-  const amount = orderTotal / count;
+  const totalCents = Math.round(orderTotal * 100);
+  const regularCents = Math.round(totalCents / count);
+  const finalCents = totalCents - regularCents * (count - 1);
   const money = value => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   $('#installment-summary').textContent = count === 1
     ? `Pagamento à vista: ${money(orderTotal)}.`
-    : `${count} parcelas de ${money(amount)} (total ${money(orderTotal)}).`;
+    : finalCents === regularCents
+      ? `${count} parcelas de ${money(regularCents / 100)} (total ${money(orderTotal)}).`
+      : `${count} parcelas: ${money(regularCents / 100)} nas primeiras ${count - 1} e ${money(finalCents / 100)} na última (total ${money(orderTotal)}).`;
 }
 function updateMethod() {
   const method = selectedMethod();
@@ -64,7 +117,7 @@ function updateMethod() {
   $('#phone').required = method === 'CREDIT_CARD';
   for (const id of ['card-number', 'expiry', 'cvv']) $(`#${id}`).required = method === 'CREDIT_CARD';
   $('#panel-title').textContent = method === 'PIX' ? 'Pix' : method === 'DEBIT_CARD' ? 'Cartão de débito' : 'Cartão de crédito';
-  $('#button-method').textContent = method === 'PIX' ? 'Gerar Pix' : method === 'DEBIT_CARD' ? 'Continuar para débito' : 'Pagar com crédito';
+  $('#button-method').textContent = method === 'PIX' ? `Gerar Pix · ${formatMoney(orderTotal)}` : method === 'DEBIT_CARD' ? `Continuar para débito · ${formatMoney(orderTotal)}` : `Pagar ${formatMoney(orderTotal)} com crédito`;
   $('#method-hint').textContent = method === 'DEBIT_CARD'
     ? 'O pagamento será concluído na página segura do Asaas, onde você poderá escolher débito.'
     : method === 'PIX' ? 'O QR Code será gerado pelo Asaas e confirmado após o pagamento.' : 'O banco pode solicitar uma etapa de autenticação 3D Secure.';
@@ -99,6 +152,9 @@ function renderPayment(payment) {
   }
 
   const finalStatuses = ['CONFIRMED', 'RECEIVED', 'REFUNDED', 'REFUND_REQUESTED', 'CHARGEBACK_REQUESTED', 'OVERDUE', 'CANCELED', 'DELETED'];
+  if (finalStatuses.includes(payment.status) && sessionStorage.getItem('pending3dsPaymentId') === payment.id) {
+    sessionStorage.removeItem('pending3dsPaymentId');
+  }
   if (['CONFIRMED', 'RECEIVED'].includes(payment.status)) {
     setRow('auth-row', 'done', payment.method === 'CREDIT_CARD' ? 'Validação processada pelo banco / 3DS' : 'Forma de pagamento processada');
     setRow('result-row', 'done', 'Pagamento confirmado pelo Asaas');
@@ -187,13 +243,14 @@ form.addEventListener('submit', async event => {
     renderPayment(payment);
     $('#status-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     if (payment.challengeUrl) {
+      sessionStorage.setItem('pending3dsPaymentId', payment.id);
       notify('O banco solicitou autenticação 3DS. Abrindo ambiente do emissor…');
       setTimeout(() => location.assign(payment.challengeUrl), 700);
     } else if (payment.invoiceUrl) notify('Cobrança criada. Continue na página segura do Asaas para escolher débito.');
     else if (payment.pix) notify('Pix criado pelo Asaas. Pague usando o QR Code ou o código copia e cola.');
     else notify('Solicitação enviada. Aguardando confirmação do Asaas.');
   } catch (error) { notify(error.message); }
-  finally { button.classList.remove('is-processing'); button.disabled = false; button.innerHTML = `<span>🔒</span> <span id="button-method">${method === 'PIX' ? 'Gerar Pix' : method === 'DEBIT_CARD' ? 'Continuar para débito' : 'Pagar com crédito'}</span> <b>→</b>`; }
+  finally { button.classList.remove('is-processing'); button.disabled = false; button.innerHTML = `<span>🔒</span> <span id="button-method">${method === 'PIX' ? `Gerar Pix · ${formatMoney(orderTotal)}` : method === 'DEBIT_CARD' ? `Continuar para débito · ${formatMoney(orderTotal)}` : `Pagar ${formatMoney(orderTotal)} com crédito`}</span> <b>→</b>`; }
 });
 
 async function loadConfig() {
@@ -204,6 +261,11 @@ async function loadConfig() {
     if (config.mode === 'asaas') {
       button.disabled = false;
       $('#pending-note').innerHTML = '<span>◉</span> Nenhum pagamento foi confirmado. A confirmação virá do Asaas.';
+      const returnedPaymentId = sessionStorage.getItem('pending3dsPaymentId');
+      if (returnedPaymentId) {
+        try { await refreshPayment(returnedPaymentId); }
+        catch { notify('Voltamos da autenticação. O Asaas ainda não retornou o status; vamos consultar novamente.'); }
+      }
     }
     else {
       config.error = config.message || 'Backend encontrado, mas ASAAS_API_KEY não está configurada.';
@@ -219,4 +281,5 @@ async function loadConfig() {
     button.disabled = true;
   }
 }
+renderQuoteItems();
 loadConfig();
