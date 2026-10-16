@@ -11,7 +11,7 @@ const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTER
 const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS || 'https://sabinadaa.github.io,http://localhost:3000,http://localhost:3001').split(',').map(origin => origin.trim()).filter(Boolean));
 if (process.env.RENDER_EXTERNAL_URL) ALLOWED_ORIGINS.add(process.env.RENDER_EXTERNAL_URL.replace(/\/$/, ''));
 const isProductionApi = API_BASE === 'https://api.asaas.com/v3';
-const PRODUCT_PRICE = 5.00;
+const PRODUCT_PRICE = 20.00;
 const PAYMENT_EVENTS = new Set([
   'PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED',
   'PAYMENT_CREDIT_CARD_THREE_D_SECURE_CHALLENGE_FAILED', 'PAYMENT_OVERDUE',
