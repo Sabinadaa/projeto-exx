@@ -3,6 +3,7 @@ const form = $('#payment-form');
 const button = $('#pay-button');
 const toast = $('#toast');
 const apiBase = (window.PAYMENT_API_BASE || '').replace(/\/+$/, '');
+const orderTotal = Number($('#payment-form').dataset.total) || 189;
 let config = { mode: 'unconfigured' };
 let currentPayment = null;
 let pollTimer = null;
@@ -46,6 +47,14 @@ $('#phone').addEventListener('input', e => {
 $('#postal').addEventListener('input', e => maskDigits(e.target, '#####-###'));
 
 function selectedMethod() { return $('input[name="payment-method"]:checked')?.value || 'PIX'; }
+function updateInstallmentSummary() {
+  const count = Number($('#installments').value) || 1;
+  const amount = orderTotal / count;
+  const money = value => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  $('#installment-summary').textContent = count === 1
+    ? `Pagamento à vista: ${money(orderTotal)}.`
+    : `${count} parcelas de ${money(amount)} (total ${money(orderTotal)}).`;
+}
 function updateMethod() {
   const method = selectedMethod();
   const cardFields = $('#card-fields');
@@ -61,6 +70,8 @@ function updateMethod() {
     : method === 'PIX' ? 'O QR Code será gerado pelo Asaas e confirmado após o pagamento.' : 'O banco pode solicitar uma etapa de autenticação 3D Secure.';
 }
 document.querySelectorAll('input[name="payment-method"]').forEach(input => input.addEventListener('change', updateMethod));
+$('#installments').addEventListener('change', updateInstallmentSummary);
+updateInstallmentSummary();
 updateMethod();
 
 function setRow(id, state, detail) {
@@ -161,11 +172,13 @@ form.addEventListener('submit', async event => {
     deviceInfo: { colorDepth: screen.colorDepth, screenHeight: screen.height, screenWidth: screen.width, timeZoneOffset: new Date().getTimezoneOffset() / 60, language: navigator.language, userAgent: navigator.userAgent }
   };
   if (method === 'CREDIT_CARD') {
+    body.installmentCount = Number($('#installments').value);
     const [month, rawYear] = $('#expiry').value.split('/').map(value => value.trim());
     body.card = { holderName: $('#name').value.trim(), number: digits('card-number'), expiryMonth: month, expiryYear: rawYear.length === 2 ? `20${rawYear}` : rawYear, ccv: digits('cvv') };
     body.holder = { ...body.holder, postalCode: digits('postal'), address: $('#address').value.trim(), addressNumber: $('#number').value.trim(), province: $('#province').value.trim() };
   }
   button.disabled = true;
+  button.classList.add('is-processing');
   button.innerHTML = '<span>◌</span> Conectando ao Asaas…';
   $('#pix-result').hidden = true;
   $('#hosted-payment').hidden = true;
@@ -180,7 +193,7 @@ form.addEventListener('submit', async event => {
     else if (payment.pix) notify('Pix criado pelo Asaas. Pague usando o QR Code ou o código copia e cola.');
     else notify('Solicitação enviada. Aguardando confirmação do Asaas.');
   } catch (error) { notify(error.message); }
-  finally { button.disabled = false; button.innerHTML = `<span>🔒</span> <span id="button-method">${method === 'PIX' ? 'Gerar Pix' : method === 'DEBIT_CARD' ? 'Continuar para débito' : 'Pagar com crédito'}</span> <b>→</b>`; }
+  finally { button.classList.remove('is-processing'); button.disabled = false; button.innerHTML = `<span>🔒</span> <span id="button-method">${method === 'PIX' ? 'Gerar Pix' : method === 'DEBIT_CARD' ? 'Continuar para débito' : 'Pagar com crédito'}</span> <b>→</b>`; }
 });
 
 async function loadConfig() {
@@ -188,15 +201,20 @@ async function loadConfig() {
     config = await request('/api/config');
     $('#mode-badge').textContent = config.mode === 'asaas' ? (config.api || 'ASAAS').toUpperCase() : 'API INDISPONÍVEL';
     $('#mode-badge').classList.toggle('live', config.mode === 'asaas');
-    if (config.mode === 'asaas') $('#pending-note').innerHTML = '<span>◉</span> Nenhum pagamento foi confirmado. A confirmação virá do Asaas.';
+    if (config.mode === 'asaas') {
+      button.disabled = false;
+      $('#pending-note').innerHTML = '<span>◉</span> Nenhum pagamento foi confirmado. A confirmação virá do Asaas.';
+    }
     else {
       config.error = config.message || 'Backend encontrado, mas ASAAS_API_KEY não está configurada.';
+      $('#button-method').textContent = 'API não configurada';
       $('#pending-note').innerHTML = '<span>!</span> Backend sem configuração Asaas. Nenhuma aprovação será simulada.';
       button.disabled = true;
     }
   } catch {
     config = { mode: 'unconfigured', error: 'Não foi possível conectar ao backend. Confira PAYMENT_API_BASE e o serviço Node.' };
     $('#mode-badge').textContent = 'API OFFLINE';
+    $('#button-method').textContent = 'Backend indisponível';
     $('#pending-note').innerHTML = '<span>!</span> Não foi possível conectar ao backend de pagamentos.';
     button.disabled = true;
   }

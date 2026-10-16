@@ -64,6 +64,7 @@ function safePayment(payment, entry) {
     orderId: entry?.orderId || payment.externalReference,
     method: entry?.method || (payment.billingType === 'PIX' ? 'PIX' : 'CREDIT_CARD'),
     amount: payment.value,
+    installmentCount: entry?.installmentCount || payment.installmentCount || 1,
     status: payment.status,
     providerStatus: payment.status,
     event: entry?.event || null,
@@ -100,6 +101,10 @@ function validate(body) {
   }
   if (method === 'CREDIT_CARD') {
     const card = body.card || {};
+    const installmentCount = Number(body.installmentCount ?? 1);
+    if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 3) {
+      throw Object.assign(new Error('Escolha entre 1 e 3 parcelas no crédito.'), { status: 400 });
+    }
     if (!/^\d{12,19}$/.test(card.number || '') || !/^\d{2}$/.test(card.expiryMonth || '') || !/^\d{4}$/.test(card.expiryYear || '') || !/^\d{3,4}$/.test(card.ccv || '')) {
       throw Object.assign(new Error('Confira os dados do cartão de crédito.'), { status: 400 });
     }
@@ -118,14 +123,20 @@ async function createAsaasPayment(body, req, orderId) {
     ...(holder.phone ? { mobilePhone: holder.phone } : {}), notificationDisabled: true
   });
   const method = body.paymentMethod;
+  const installmentCount = method === 'CREDIT_CARD' ? Number(body.installmentCount ?? 1) : 1;
   const requestBody = {
     customer: customer.id,
     billingType: method === 'PIX' ? 'PIX' : 'CREDIT_CARD',
-    value: PRODUCT_PRICE,
     dueDate: new Date().toISOString().slice(0, 10),
     description: 'Whey 100% Concentrado Pouch 900g — EXX Nutrition',
     externalReference: orderId
   };
+  if (method === 'CREDIT_CARD' && installmentCount > 1) {
+    requestBody.installmentCount = installmentCount;
+    requestBody.totalValue = PRODUCT_PRICE;
+  } else {
+    requestBody.value = PRODUCT_PRICE;
+  }
   if (method === 'CREDIT_CARD') {
     requestBody.creditCard = {
       holderName: body.card.holderName,
@@ -146,7 +157,7 @@ async function createAsaasPayment(body, req, orderId) {
   let pix = null;
   if (method === 'PIX') pix = await asaas(`/payments/${encodeURIComponent(providerPayment.id)}/pixQrCode`, 'GET');
   const entry = {
-    id: providerPayment.id, orderId, method, amount: PRODUCT_PRICE,
+    id: providerPayment.id, orderId, method, amount: PRODUCT_PRICE, installmentCount,
     status: providerPayment.status || 'PENDING', event: null,
     challengeUrl: providerPayment.threeDSecureChallengeUrl || null,
     invoiceUrl: providerPayment.invoiceUrl || null, pix,
